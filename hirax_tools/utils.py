@@ -40,6 +40,30 @@ def pointing(times, altitude, azimuth, location=HARTRAO_COORD, frame='ICRS'):
     new_frame = coords.frame_transform_graph.lookup_name(frame.lower())
     return altazs.transform_to(new_frame)
 
+def sun_sep(pointing, times, location=HARTRAO_COORD, return_alt=False,
+            mask_when_set=True):
+    sun = coords.get_sun(times)
+    sun_seps = pointing.separation(sun)
+    sun_alts = sun.transform_to(coords.AltAz(location=location)).alt
+    if mask_when_set:
+        sun_seps[sun_alts < -1*units.degree] = np.NaN
+    if not return_alt:
+        return sun_seps
+    else:
+        return sun_seps, sun_alts
+
+def moon_sep(pointing, times, location=HARTRAO_COORD, return_alt=False,
+             mask_when_set=True):
+    moon = coords.get_moon(times)
+    moon_seps = pointing.separation(moon)
+    moon_alts = moon.transform_to(coords.AltAz(location=location)).alt
+    if mask_when_set:
+        moon_seps[moon_alts < -1*units.degree] = np.NaN
+    if not return_alt:
+        return moon_seps
+    else:
+        return moon_seps, moon_alts
+
 def lmn_coordinates(pointing, target, location=HARTRAO_COORD):
     offset_coordinates = target.transform_to(pointing.skyoffset_frame())
     cart = offset_coordinates.represent_as(coords.representation.CartesianRepresentation)
