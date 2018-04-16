@@ -50,12 +50,17 @@ class RawData(object):
             Default: False
         """
 
-        if transpose_on_init and not overwrite_original:
-            print('Creating temporary file for transpose.')
-            tmp_file = tempfile.NamedTemporaryFile(delete=False)
-            self.is_temp_file = True
-            shutil.copyfile(filename, tmp_file.name)
-            self.filename = tmp_file.name
+        if transpose_on_init:
+            if not overwrite_original:
+                print('Creating temporary file for transpose.')
+                tmp_file = tempfile.NamedTemporaryFile(delete=False)
+                self.is_temp_file = True
+                shutil.copyfile(filename, tmp_file.name)
+                self.filename = tmp_file.name
+                self.is_temp_file = False
+            else:
+                self.filename = filename
+
             with h5py.File(self.filename, 'a') as raw_hdf:
                 if 'vis_transposed' not in raw_hdf.keys():
                     print('Transposing...')
