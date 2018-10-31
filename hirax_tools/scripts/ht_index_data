@@ -1,0 +1,46 @@
+#! /usr/bin/env python
+
+from __future__ import (division, print_function, absolute_import,
+                        unicode_literals)
+
+import os
+import argparse
+
+from astropy import coordinates as coords
+import numpy as np
+import pandas as pd
+
+from hirax_tools.core import RawData
+from hirax_tools.utils import pointing, sun_sep, moon_sep
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description='Create HIRAX data file index.')
+    parser.add_argument('filenames', type=str, nargs='+')
+    parser.add_argument('altitude', type=float)
+    parser.add_argument('--append_filename', type=str, default=None)
+    parser.add_argument('--output_filename', type=str, default=os.path.join(os.getcwd(), 'index.df'))
+    parser.add_argument('--test_run', action='store_true')
+    args = parser.parse_args()
+
+    if args.append_filename is not None:
+        df = pd.read_pickle(args.append_filename)
+        filenames = (f for f in args.filenames if f not in df.filename.values)
+    else:
+        df = pd.DataFrame()
+        filenames = args.filenames
+    for fname in filenames:
+        print('Opening {:s}'.format(fname))
+        if not args.test_run:
+            try:
+                rd = RawData(fname)
+            except OSError as e:
+                print('Failed to open {:s}'.format(fname))
+                print(e)
+                continue
+            curr_index = rd.index(altitude=float(args.altitude), azimuth=180)
+            curr_index['filename'] = np.full(len(curr_index), fname)
+            df = df.append(curr_index)
+            print(len(df))
+    if not args.test_run:
+        df.to_pickle(args.output_filename)

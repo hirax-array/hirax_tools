@@ -13,6 +13,7 @@ from astropy.time import Time
 from astropy.visualization import PercentileInterval, ImageNormalize
 
 from .utils import butterworth_filter
+from .indexing import index_file
 
 class RawData(object):
     """
@@ -103,6 +104,9 @@ class RawData(object):
             out = raw_hdf['index_map/freq']['centre'][
                 self.freq_slice]
         return out
+
+    def index(self, azimuth, altitude):
+        return index_file(self, altitude=altitude, azimuth=azimuth)
 
     def raw_query(self, query):
         """

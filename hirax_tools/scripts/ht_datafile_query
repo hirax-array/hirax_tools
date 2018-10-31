@@ -1,0 +1,30 @@
+#! /usr/bin/env python
+
+from __future__ import (division, print_function, absolute_import,
+                        unicode_literals)
+
+import argparse
+import pandas as pd
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description='Query filenames from datafile index.')
+    parser.add_argument('index_filename', type=str)
+    parser.add_argument('--dataframe_query', type=str)
+    parser.add_argument('--datetime_slice', type=str, nargs=2)
+    parser.add_argument('--output_dataframe', type=str)
+    args = parser.parse_args()
+
+    df = pd.read_pickle(args.index_filename)
+    if args.datetime_slice is not None:
+        slc = slice(args.datetime_slice[0], args.datetime_slice[1])
+        df = df.loc[slc]
+    if args.dataframe_query is not None:
+        df = df.query(args.dataframe_query)
+
+    fnames = df.filename.unique()
+    print('\n'.join(fnames))
+    if args.output_dataframe is not None:
+        df.to_pickle(args.output_dataframe)
+
+
