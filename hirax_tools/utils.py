@@ -64,7 +64,7 @@ def moon_sep(pointing, times, location=HARTRAO_COORD, return_alt=False,
     else:
         return moon_seps, moon_alts
 
-def lmn_coordinates(pointing, target, location=HARTRAO_COORD):
+def lmn_coordinates(pointing, target):
     offset_coordinates = target.transform_to(pointing.skyoffset_frame())
     cart = offset_coordinates.represent_as(coords.representation.CartesianRepresentation)
     l, m, n = cart.y.value, cart.z.value, cart.x.value - 1
@@ -92,6 +92,6 @@ def butterworth_filter(data, filter_type, char_freqs, order=4, sample_rate=1,
     broadcast_axes[axis] = slice(None, None, -1)
 
     # filter data on axis specified
-    filtered_vis_fft = vis_fft*(np.abs(h)[broadcast_axes]**2)
+    filtered_vis_fft = vis_fft*(np.abs(h)[tuple(broadcast_axes)]**2)
 
     return np.fft.ifft(filtered_vis_fft, axis=axis)
