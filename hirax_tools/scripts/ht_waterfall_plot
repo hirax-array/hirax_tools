@@ -1,0 +1,187 @@
+#! /usr/bin/env python
+
+from __future__ import (division, print_function, absolute_import,
+                        unicode_literals)
+
+import os
+from collections import OrderedDict
+from itertools import zip_longest
+import pytz
+import argparse
+
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
+plt.style.use('my_style')
+from matplotlib import dates
+from astropy import coordinates as coords
+from astropy import units
+import numpy as np
+
+from hirax_tools.utils import HARTRAO_COORD
+from hirax_tools.core import RawData
+import hirax_tools.utils as htutils
+from hirax_tools.utils import baseline_cross_list
+
+# Put all in config file:
+# This will be in array config object
+NFEEDS = 16
+
+ARRAY_INDEX = [(i // 2+1, i % 2) for i in range(16)]
+
+ARRAY_LABEL = ['Dish {:d}, Pol {:d}'.format(*arr_ind)
+               for arr_ind in ARRAY_INDEX]
+
+# Will be a config file one day...
+SOURCE_COORDS = OrderedDict([
+    # ('Vela Pulsar', coords.SkyCoord(
+    #     ra='08h35m20.65525s', dec='-45d10m35.1545s')),
+    # ('Cen. A', coords.SkyCoord(
+    #     ra='13h25m27.6s', dec='-43d01m09s')),
+    # ('Pic. A', coords.SkyCoord(
+    #     ra='05h19m49.7s', dec='-45d46m44s')),
+    ('Fornax A', coords.SkyCoord(
+        ra='03h22m41.7s', dec='−37d12m30s')),
+    ('Gal. Center', coords.SkyCoord(
+        l=0*units.degree, b=0*units.degree,
+        frame=coords.Galactic))]
+)
+
+SAST = pytz.timezone('Africa/Johannesburg')
+VIS_PLOT_KWARGS = {
+    # 'threshold_percentile': 80,
+    # 'remove_median': True,
+    # 'mask_percentile': 100
+
+    'threshold_percentile': 65,
+    'remove_median': True,
+    'mask_percentile': 90
+}
+FILT_KWARGS = {
+    # 'char_freqs': 1/60,
+    # 'filter_type': 'lowpass'
+    'char_freqs': (1/1500, 1/20),
+    'filter_type':'band'
+}
+
+TIME_SUBSAMPLE = 1
+FREQ_SUBSAMPLE = 1
+
+def waterfall_plot(rd, alt, az, baseline,
+                   seps=True, sun=True, moon=True, gal_plane=True,
+                   sources=SOURCE_COORDS, which='mag'):
+
+    pntg = htutils.pointing(rd.times, alt, az)
+
+    if seps:
+        fig, (waterfall_axis, sep_axis) = plt.subplots(
+            1, 2, figsize=(9, 4.4), sharey='row')
+        sast_axis = sep_axis.twinx()
+
+        num_dates = dates.date2num(rd.times.to_datetime())
+        sep_axis.yaxis_date()
+
+        if sun:
+            sun_sep = htutils.sun_sep(pntg, times=rd.times)
+            sep_axis.plot(sun_sep.degree, num_dates , label='Sun')
+        if moon:
+            moon_sep = htutils.moon_sep(pntg, times=rd.times)
+            sep_axis.plot(moon_sep.degree, num_dates, label='Moon')
+
+        for sname, scoord in sources.items():
+            source_sep = pntg.separation(scoord)
+            sep_axis.plot(source_sep.degree, num_dates , label=sname)
+
+        if gal_plane:
+            gal_plane = coords.AltAz(
+                alt=np.ones(len(rd.times))*alt,
+                az=np.ones(len(rd.times))*az,
+                obstime=rd.times, location=HARTRAO_COORD)
+            sep_axis.plot(np.abs(gal_plane.transform_to(coords.Galactic).b),
+                          num_dates, label='Gal. Plane')
+
+        sep_axis.set_ylim(num_dates[0], num_dates[-1])
+        sep_axis.legend(bbox_to_anchor=(1.02, 0, 0.15, 1),
+                        loc='right', handlelength=0.5,
+                        mode='expand', bbox_transform=fig.transFigure)
+        sep_axis.set_xlim(0, 90)
+        sep_axis.set_xlabel('Separation [deg]')
+        sep_axis.set_ylim(num_dates[-1], num_dates[0])
+        plt.setp(sep_axis.get_yticklabels(), visible=False)
+
+        sast_axis.plot(np.full_like(num_dates, 0.),
+                       dates.date2num(rd.times.to_datetime(SAST)), alpha=0)
+        sast_axis.yaxis_date()
+        sast_axis.set_ylim(num_dates[-1], num_dates[0])
+
+        sast_axis.set_ylabel('SAST')
+        sast_axis.yaxis.set_major_locator(
+            dates.MinuteLocator(byminute=[0, 30], tz=SAST))
+        sast_axis.yaxis.set_major_formatter(
+            dates.DateFormatter('%H:%M:%S', tz=SAST))
+    else:
+        fig, waterfall_axis = plt.subplots(1, 1, figsize=(5, 4.4))
+
+    fig = rd.waterfall_plot(baseline, axis=waterfall_axis,
+                            filt_kwargs=FILT_KWARGS,
+                            which=which,
+                            **VIS_PLOT_KWARGS)
+
+    label_a = ARRAY_LABEL[baseline[0]]
+    label_b = ARRAY_LABEL[baseline[1]]
+    fig.suptitle(r'{:s} $\times$ {:s}'.format(label_a, label_b))
+
+    fig.subplots_adjust(wspace=0.075)
+    return fig
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description='Create waterfall plots.')
+    parser.add_argument('filenames', type=str, nargs='+')
+    parser.add_argument('altitude', type=float)
+    parser.add_argument('--transpose_first', action='store_true')
+    parser.add_argument('--plot_separations', action='store_true')
+    parser.add_argument('--output_type', type=str, default='png')
+    parser.add_argument('--output_dir', type=str, default=os.getcwd())
+    parser.add_argument('--which', type=str, default='mag')
+    parser.add_argument('--test_run', action='store_true')
+    parser.add_argument('--no_auto', action='store_false')
+    parser.add_argument('--only_auto', action='store_true')
+    parser.add_argument('--baselines', type=int, nargs='+',
+                        choices=list(range(0, NFEEDS)),
+                        default=list(range(0, NFEEDS)))
+    args = parser.parse_args()
+    alt = args.altitude * units.degree
+    az = 180 * units.degree
+
+    if args.only_auto:
+        baseline_list = list(zip(args.baselines, args.baselines))
+    else:
+        baseline_list = baseline_cross_list(args.baselines, auto=args.no_auto)
+
+    template = '{:s}_bl_{:d}x{:d}_wf_{:s}'
+
+    for fname in args.filenames:
+        print('Opening {:s}'.format(fname))
+        if not args.test_run:
+            rd = RawData(fname, time_subsample=TIME_SUBSAMPLE,
+                         freq_subsample=FREQ_SUBSAMPLE,
+                         transpose_on_init=args.transpose_first)
+            isotime = rd.times[0].iso.replace(' ', '_')
+        for bl in baseline_list:
+            print('Baseline: {:s}'.format(str(bl)))
+            try:
+                if not args.test_run:
+                    fig = waterfall_plot(rd, alt, az, bl, seps=args.plot_separations,
+                                         which=args.which)
+                    outname = '.'.join((template.format(isotime, bl[0], bl[1], args.which), args.output_type))
+                    full_out = os.path.join(args.output_dir, outname)
+                    print('Saving {:s}'.format(full_out))
+                    fig.savefig(full_out, bbox_inches='tight')
+                    plt.close(fig)
+            except Exception as e:
+                print('Failed')
+                print(e)
+        if not args.test_run:
+            if rd.is_temp_file:
+                os.remove(rd.filename)

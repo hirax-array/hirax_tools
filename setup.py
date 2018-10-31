@@ -8,8 +8,6 @@ setup(name='hirax_tools',
       author='Devin Crichton',
       author_email='devin.crichton@gmail.com',
       packages=['hirax_tools',],
-      # scripts=['hirax_tools/scripts/ht_transpose_vis',
-      #          'hirax_tools/scripts/ht_waterfall_plot',
-      #          'hirax_tools/scripts/ht_index_data',
-      #          'hirax_tools/scripts/ht_datafile_query']
+      scripts=['hirax_tools/scripts/ht_transpose_vis',
+               'hirax_tools/scripts/ht_waterfall_plot']
      )
