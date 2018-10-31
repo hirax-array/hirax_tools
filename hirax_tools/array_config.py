@@ -1,6 +1,7 @@
 from __future__ import (division, print_function, absolute_import,
                         unicode_literals)
 
+from functools import partial
 from itertools import combinations
 import numpy as np
 from scipy.interpolate import InterpolatedUnivariateSpline as spline
@@ -10,6 +11,8 @@ import matplotlib.pyplot as plt
 from astropy import coordinates as coords
 from astropy import units
 
+from hirax_tools.utils import HARTRAO_COORD, pointing, lmn_coordinates
+
 
 class HIRAXArrayConfig(object):
     """
@@ -17,7 +20,8 @@ class HIRAXArrayConfig(object):
     """
     @classmethod
     def from_n_elem_compact(cls, Ndish, spacing,
-                            alt=90, az=180, Ddish=6):
+                            altitude=90, azimuth=180, Ddish=6,
+                            reference_coordinate=None):
         """
         Creates a HIRAXArrayConfig object assuming a compact square array
         given a number of dishes and a grid spacing.
@@ -29,13 +33,18 @@ class HIRAXArrayConfig(object):
             rounded down.
         spacing : number, `~astropy.units.Quantity`
             Dish spacing in meters unless a Quantity object with equivalent units.
-        alt : number, `~astropy.coordinates.Angle`
+        altitude : number, `~astropy.coordinates.Angle`
             Array pointing altitude in degrees or an Angle object. Default: 90 deg
-        az : number, `~astropy.coordinates.Angle`
+        azimuth : number, `~astropy.coordinates.Angle`
             Array pointing azimuth in degrees or an Angle object. Default: 180 deg
         Ddish : number, `~astropy.units.Quantity`
             Dish diameter in meters unless a Quantity object with equivalent units.
             Default: 6 m
+        reference coordinate : `~astropy.coordinates.EarthLocation` object or None
+            The reference coordinate for the array, defining the location of the
+            reference (SE) dish. Only necessary for pointing calculations. If None
+            certain methods will raise ValueError exceptions.
+            Default: None
 
         """
         spacing = units.Quantity(spacing, unit=units.m)
@@ -43,11 +52,13 @@ class HIRAXArrayConfig(object):
         # Reference dish is the SE dish
         d_ew = -spacing*(np.arange(Ndish) % Nside)
         d_ns = spacing*(np.arange(Ndish) // Nside)
-        return cls(d_ew, d_ns, alt=alt, az=az, Ddish=Ddish)
+        return cls(d_ew, d_ns, altitude=altitude, azimuth=azimuth, Ddish=Ddish,
+                   reference_coordinate=reference_coordinate)
 
     @classmethod
     def from_n_elem_footprint(cls, Ndish, box_size,
-                              alt=90, az=180, Ddish=6):
+                              altitude=90, azimuth=180, Ddish=6,
+                              reference_coordinate=None):
         """
         Creates a HIRAXArrayConfig object assuming a compact square array
         given a number of dishes and a footprint size.
@@ -60,22 +71,29 @@ class HIRAXArrayConfig(object):
         box_size : number, `~astropy.units.Quantity`
             Length of square side of array footprint in meters unless a Quantity
             object with equivalent units.
-        alt : number, `~astropy.coordinates.Angle`
+        altitude : number, `~astropy.coordinates.Angle`
             Array pointing altitude in degrees or an Angle object. Default: 90 deg
-        az : number, `~astropy.coordinates.Angle`
+        azimuth : number, `~astropy.coordinates.Angle`
             Array pointing azimuth in degrees or an Angle object. Default: 180 deg
         Ddish : number, `~astropy.units.Quantity`
             Dish diameter in meters unless a Quantity object with equivalent units.
             Default: 6 m
+        reference coordinate : `~astropy.coordinates.EarthLocation` object or None
+            The reference coordinate for the array, defining the location of the
+            reference (SE) dish. Only necessary for pointing calculations. If None
+            certain methods will raise ValueError exceptions.
+            Default: None
         """
         Nside = np.ceil(np.sqrt(Ndish)).astype(int)
         box_size = units.Quantity(box_size, unit=units.m)
         d_ew, d_ns = np.meshgrid(
             np.linspace(-box_size/2, box_size/2, Nside),
             np.linspace(-box_size/2, box_size/2, Nside))
-        return cls(d_ew.ravel(), d_ns.ravel(), alt=alt, az=az, Ddish=Ddish)
+        return cls(d_ew.ravel(), d_ns.ravel(), altitude=altitude, azimuth=azimuth, Ddish=Ddish,
+                   reference_coordinate=reference_coordinate)
 
-    def __init__(self, d_ew, d_ns, alt=90, az=180, Ddish=6):
+    def __init__(self, d_ew, d_ns, altitude=90, azimuth=180, Ddish=6,
+                 reference_coordinate=None):
         """
         Initialise a HIRAXArrayConfig object, specifying the relative EW and NS
         coordinates of each dish in the array.
@@ -88,22 +106,27 @@ class HIRAXArrayConfig(object):
         d_ew : array-like, `~astropy.units.Quantity`
             Relative North-South coordinates of dishes comprising the array in meters unless
             a Quantity object with equivalent units.
-        alt : number, `~astropy.coordinates.Angle`
+        altitude : number, `~astropy.coordinates.Angle`
             Array pointing altitude in degrees or an Angle object. Default: 90 deg
-        az : number, `~astropy.coordinates.Angle`
+        azimuth : number, `~astropy.coordinates.Angle`
             Array pointing azimuth in degrees or an Angle object. Default: 180 deg
         Ddish : number, `~astropy.units.Quantity`
             Dish diameter in meters unless a Quantity object with equivalent units.
             Default: 6 m
-
+        reference coordinate : `~astropy.coordinates.EarthLocation` object or None
+            The reference coordinate for the array, defining the location of the
+            reference (SE) dish. Only necessary for pointing calculations. If None
+            certain methods will raise ValueError exceptions.
+            Default: None
         """
         self.Ddish = units.Quantity(Ddish, unit=units.m)
         self.d_ew = units.Quantity(d_ew, unit=units.m)
         self.d_ns = units.Quantity(d_ns, unit=units.m)
         self.n_dish = len(self.d_ns) # Could do some checks here
-        self.alt = coords.Angle(alt, unit=units.degree)
-        self.az = coords.Angle(az, unit=units.degree)
+        self.altitude = coords.Angle(altitude, unit=units.degree)
+        self.azimuth = coords.Angle(azimuth, unit=units.degree)
         self.baseline_pairs = np.array([(a, b) for a, b in combinations(range(len(self.d_ew)), 2)])
+        self.reference_coordinate = reference_coordinate
 
     def uv_redundancy(self, frequency=600*units.MHz):
         """
@@ -168,6 +191,51 @@ class HIRAXArrayConfig(object):
         axis.set_xlabel('u')
         return fig
 
+    def pointing(self, times, frame='ICRS'):
+
+        """
+        Returns the pointing of the array given in the for the times specified
+        coordinate frame specified.
+
+        Parameters
+        ----------
+        times : `~astropy.time.Time` object
+            The times for the pointing to be computed.
+        frames : string
+            String representation of the coordinate frame to return the pointing in.
+            Can be any frame defined in `~astropy.coordinates`
+            Default : ICRS
+
+        Returns
+        -------
+        `~astropy.coordinates.SkyCoord` object containing the pointing coordinates.
+        """
+
+        if self.reference_coordinate is None:
+            raise ValueError('Pointing calculations require a reference_coordinate attribute.')
+        return pointing(times, self.altitude, self.azimuth,
+                        location=self.reference_coordinate, frame=frame)
+
+    def lmn_coordinates(self, times, target):
+        """
+        Returns the l,m,n coordinates (direction cosines) of a target with respect to the array
+        pointing for the input times.
+
+        Parameters
+        ----------
+        times : `~astropy.time.Time` object
+            The times for the l,m,n coordinates to be computed.
+        target : `~astropy.coordinates.SkyCoord` object
+            SkyCoord object representing the location of the target on the sky
+
+        Returns
+        -------
+        tuple
+            (l,m,n) coordinates, each of shape len(times)
+        """
+        pntg = self.pointing(times)
+        return lmn_coordinates(pntg, target)
+
     def uvw_coords(self, frequency=600*units.MHz, baseline_pairs=None):
         """
         Return the u, v, w coordinates of all or a subset of baseline pairs
@@ -197,9 +265,9 @@ class HIRAXArrayConfig(object):
 
         du = ((self.d_ew[baseline_pairs[:, 0]] - self.d_ew[baseline_pairs[:, 1]])/lamb).to('').value
         dv = ((self.d_ns[baseline_pairs[:, 0]] - self.d_ns[baseline_pairs[:, 1]])/lamb).to('').value
-        u = du*np.cos(self.az.rad)
-        v = dv*np.sin(self.alt.rad)
-        w = np.sqrt((du*np.sin(self.az.rad))**2 + (dv*np.cos(self.alt.rad))**2)
+        u = du*np.cos(self.azimuth.rad)
+        v = dv*np.sin(self.altitude.rad)
+        w = np.sqrt((du*np.sin(self.azimuth.rad))**2 + (dv*np.cos(self.altitude.rad))**2)
         return u, v, w
 
     def fov(self, frequency=600*units.MHz):
@@ -317,3 +385,14 @@ class HIRAXArrayConfig(object):
         n_x = norm*n_u * fid_freq.to('MHz').value**2
         xs = us / fid_freq.to('MHz').value
         return xs, n_x
+
+
+hartrao_ew, hartrao_ns = np.meshgrid([0, 9, 18, 27], [0, 9])*units.m
+
+HartRAOArrayConfig = partial(
+    HIRAXArrayConfig,
+    d_ew=hartrao_ew.ravel(),
+    d_ns=hartrao_ns.ravel(),
+    azimuth=180,
+    Ddish=6,
+    reference_coordinate=HARTRAO_COORD)
