@@ -93,7 +93,7 @@ class HIRAXArrayConfig(object):
                    reference_coordinate=reference_coordinate)
 
     def __init__(self, d_ew, d_ns, altitude=90, azimuth=180, Ddish=6,
-                 reference_coordinate=None):
+                 reference_coordinate=None, sort_coords=False):
         """
         Initialise a HIRAXArrayConfig object, specifying the relative EW and NS
         coordinates of each dish in the array.
@@ -118,6 +118,10 @@ class HIRAXArrayConfig(object):
             reference (SE) dish. Only necessary for pointing calculations. If None
             certain methods will raise ValueError exceptions.
             Default: None
+        sort_coords : boolean
+            If True, sort input dish coordinates from East to West, then North to
+            South. If False, leave in input order.
+            Default: False
         """
         self.Ddish = units.Quantity(Ddish, unit=units.m)
         self.d_ew = units.Quantity(d_ew, unit=units.m)
@@ -127,8 +131,16 @@ class HIRAXArrayConfig(object):
         self.azimuth = coords.Angle(azimuth, unit=units.degree)
         self.baseline_pairs = np.array([(a, b) for a, b in combinations(range(len(self.d_ew)), 2)])
         self.reference_coordinate = reference_coordinate
+        if sort_coords:
+            self.sort_coords()
 
-    def uv_redundancy(self, frequency=600*units.MHz):
+    def sort_coords(self):
+        sort_inds = np.lexsort((-self.d_ew, self.d_ns))
+        self.d_ew = self.d_ew[sort_inds]
+        self.d_ns = self.d_ns[sort_inds]
+
+    def uv_redundancy(self, frequency=600*units.MHz, sort='ascending',
+                      tolerance=10):
         """
         Return the unique u and v coordinates from the given array configuration
         along with their degree of redundancy, ie. the number of baselines that have
@@ -139,7 +151,12 @@ class HIRAXArrayConfig(object):
         frequency : number or `~astropy.units.Quantity`, optional
             frequency in MHz or Quantity object with equivalent units.
             Default: 600 MHz
-
+        sort : string, 'ascending' or 'descending', optional
+            How to sort output by redundancy.
+            Default: 'ascending'
+        tolerance : int, number of significant figures to use for redundancy
+            calculation.
+            Default : 10
         Returns
         -------
         tuple
@@ -148,13 +165,21 @@ class HIRAXArrayConfig(object):
         """
 
         full_u, full_v, _ = self.uvw_coords(frequency=frequency)
-        uniq_uv, redun_counts = np.unique(
-            np.array([full_u, full_v]), axis=1, return_counts=True)
-        uniq_u, uniq_v = uniq_uv
-        return uniq_u, uniq_v, redun_counts
+        uv_for_unique = np.round(full_u, tolerance) + 1j*np.round(full_v, tolerance)
+
+        uniq_uv, inverse, redun_counts = np.unique(uv_for_unique, return_counts=True, return_inverse=True)
+        uniq_u, uniq_v = uniq_uv.real, uniq_uv.imag
+
+        sort_inds = np.argsort(redun_counts)
+        if sort.lower() == 'descending':
+            sort_inds = sort_inds[::-1]
+        elif sort.lower() != 'ascending':
+            raise ValueError("'sort' must be either 'ascending' or 'descending'.")
+        return uniq_u[sort_inds], uniq_v[sort_inds], redun_counts[sort_inds], inverse[sort_inds]
 
     def baseline_redundancy_plot(self, frequency=600*units.MHz,
-                                 reflect_uv=True, axis=None):
+                                 reflect_uv=True, axis=None, log_scale=False,
+                                 scatter_kwargs={}):
         """
         Plots the unique u and v coordinates corresponding to an array configuration
         with a colorscale indicating the number of redundant baselines of those
@@ -167,11 +192,14 @@ class HIRAXArrayConfig(object):
             Default: 600 MHz
         reflect_uv : boolean
             Whether to include the full reflected u and v coordinates in the plot.
-            Ie. plot u,v and -u, -v. (default: True)
+            Ie. plot u,v and -u, -v.
+            Default: True
         axis : `~matplotlib.axes.Axes` or None
             The matplotlib axis to use. If None, a new axis will be instantiated.
             Default: None
-
+        scatter_kwargs : dict of extra keyword arguments to pass to the matplotlib
+            scatter call.
+            Default : {}
         Returns
         -------
         `~matplotlib.figure.Figure` object containing the redundancy plot.
@@ -182,13 +210,18 @@ class HIRAXArrayConfig(object):
         else:
             fig = axis.figure
 
-        uniq_u, uniq_v, redun_cts = self.uv_redundancy(frequency=frequency)
-        cf = axis.scatter(uniq_u, uniq_v, c=redun_cts)
+        uniq_u, uniq_v, redun_cts, _ = self.uv_redundancy(frequency=frequency)
+        if log_scale:
+            redun_cts = np.log10(redun_cts)
+            label = '$\log_{10}(\mathrm{Redundancy})$'
+        else:
+            label = 'Redundancy'
+        cf = axis.scatter(uniq_u, uniq_v, c=redun_cts, **scatter_kwargs)
         if reflect_uv:
-            axis.scatter(-uniq_u, -uniq_v, c=redun_cts)
-        fig.colorbar(cf, ax=axis)
-        axis.set_ylabel('v')
-        axis.set_xlabel('u')
+            axis.scatter(-uniq_u, -uniq_v, c=redun_cts, **scatter_kwargs)
+        fig.colorbar(cf, ax=axis, label=label)
+        axis.set_ylabel('$v$')
+        axis.set_xlabel('$u$')
         return fig
 
     def pointing(self, times, frame='ICRS'):
