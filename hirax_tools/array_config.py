@@ -197,6 +197,10 @@ class HIRAXArrayConfig(object):
         axis : `~matplotlib.axes.Axes` or None
             The matplotlib axis to use. If None, a new axis will be instantiated.
             Default: None
+        log_scale : boolean, optional
+            Whether to use a logarithmic (base 10) scale for the color scale of the
+            redundancy plot.
+            Default: False
         scatter_kwargs : dict of extra keyword arguments to pass to the matplotlib
             scatter call.
             Default : {}
