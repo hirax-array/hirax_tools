@@ -12,7 +12,7 @@ from matplotlib import dates
 from astropy.time import Time
 from astropy.visualization import PercentileInterval, ImageNormalize
 
-from .utils import butterworth_filter
+from .utils import butterworth_filter, colorize
 from .indexing import index_file
 
 class RawData(object):
@@ -248,7 +248,7 @@ class RawData(object):
             return axis, dates.date2num(self.times.datetime)
         else:
             raise ValueError("'which' must be x or y.")
-        
+
 
     def waterfall_plot(self, baseline,
                        threshold_percentile=100,
@@ -256,7 +256,7 @@ class RawData(object):
                        remove_median=False, axis=None,
                        baseline_title=False, which='mag',
                        filt_kwargs=None, mask=None,
-                       other_data=None):
+                       other_data=None, complex_hsl=False):
 
         if type(baseline) is tuple:
             baseline = self.baseline_from_prod(baseline)
@@ -279,11 +279,6 @@ class RawData(object):
 
         if mask is None:
             mask = np.abs(image) > np.percentile(np.abs(image), q=mask_percentile)
-        image[mask] = np.NaN
-
-        norm = ImageNormalize(
-            image,
-            interval=PercentileInterval(threshold_percentile))
 
         extent = (self.bands[0], self.bands[-1],
                   dates.date2num(self.times.datetime[-1]),
@@ -292,8 +287,22 @@ class RawData(object):
         aspect = np.abs(
             (extent[1] - extent[0]) / (extent[3] - extent[2]))
 
-        _ = axis.imshow(image, norm=norm, cmap='RdBu_r',
-                        aspect=aspect, extent=extent)
+        if not complex_hsl:
+            image[mask] = np.NaN
+            norm = ImageNormalize(
+                image,
+                interval=PercentileInterval(threshold_percentile))
+            _ = axis.imshow(image, norm=norm, cmap='RdBu_r',
+                            aspect=aspect, extent=extent)
+        else:
+            dperc = (100 - threshold_percentile)/2
+            zmin, zmax = np.percentile(np.abs(image[~mask]),
+                                       q=(dperc, 100-dperc))
+            print(zmin, zmax)
+            image = colorize(image, zmin=zmin, zmax=zmax)
+            image[mask, :] = np.NaN
+            _ = axis.imshow(image,
+                            aspect=aspect, extent=extent)
 
         axis, _ = self.time_axis(which='y', axis=axis)
 

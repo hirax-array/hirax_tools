@@ -1,3 +1,4 @@
+
 from __future__ import (division, print_function, absolute_import,
                         unicode_literals)
 
@@ -7,6 +8,7 @@ from astropy import coordinates as coords
 from astropy.stats import gaussian_fwhm_to_sigma
 from scipy import signal
 import numpy as np
+from colorsys import hls_to_rgb
 
 # From: http://www.hartrao.ac.za/HartRAO_Coordinates.html, using VLBI pos for now
 # will be off by 10s of meters
@@ -15,6 +17,22 @@ HARTRAO_COORD = coords.EarthLocation.from_geodetic(
     lat=-25.8897515*units.deg,
     height=1415.710*units.m,
     ellipsoid='WGS84')
+
+def colorize(z, s=1.0, zmin=None, zmax=None, zero='black'):
+    # Adapted from https://stackoverflow.com/questions/17044052/mathplotlib-imshow-complex-2d-array
+    h = (np.angle(z) + np.pi)  / (2 * np.pi) + 0.5
+    if zmin is None:
+        zmin = np.abs(z).min()
+    if zmax is None:
+        zmax= np.abs(z).max()
+    magz = (np.abs(z) - zmin)/zmax # Range from 0 to 1
+    magz[np.abs(z) <= zmin] = 0.
+    magz[np.abs(z) >= zmax] = 1.
+    if zero == 'white':
+        l = 1 - 0.5*magz
+    elif zero == 'black':
+        l = 0.5*magz
+    return np.array(np.vectorize(hls_to_rgb)(h,l,s)).swapaxes(0, 2).swapaxes(0, 1)
 
 def baseline_cross_list(channel_indices, auto=True):
     if auto:
