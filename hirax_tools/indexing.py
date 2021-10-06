@@ -5,19 +5,20 @@ from astropy import coordinates as coords
 import numpy as np
 import pandas as pd
 
-from .utils import pointing, sun_sep, moon_sep
+from .utils import pointing, sun_sep, moon_sep, HARTRAO_COORD
 
 # Could be OO
-def index_file(rd, altitude=90, azimuth=180):
+def index_file(rd, altitude=90, azimuth=180, 
+               location=HARTRAO_COORD):
     out_dict = {}
     utc_time = rd.times.to_datetime()
-    pntg = pointing(rd.times, altitude, azimuth)
+    pntg = pointing(rd.times, altitude, azimuth, location=location)
     ss, sa = sun_sep(pntg, times=rd.times, return_alt=True,
-                     mask_when_set=False)
+                     mask_when_set=False, location=location)
     out_dict['sun_sep'] = ss
     out_dict['sun_alt'] = sa
     ms, ma = moon_sep(pntg, times=rd.times, return_alt=True,
-                      mask_when_set=False)
+                      mask_when_set=False, location=location)
     out_dict['moon_sep'] = ms
     out_dict['moon_alt'] = ma
     out_dict['ra'] = pntg.ra.degree

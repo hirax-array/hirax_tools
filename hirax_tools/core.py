@@ -2,6 +2,7 @@ from __future__ import (division, print_function, absolute_import,
                         unicode_literals)
 
 from itertools import combinations_with_replacement
+import glob
 
 import numpy as np
 import tempfile
@@ -21,7 +22,7 @@ class RawData(object):
     """
     def __init__(self, filename, time_subsample=1,
                  freq_subsample=1, transpose_on_init=False,
-                 overwrite_original=False):
+                 overwrite_original=False, ctime_offset=0.):
         """
         Creates a RawData object given the filename of a HIRAX 
         formatted hdf5 file
@@ -70,20 +71,25 @@ class RawData(object):
                     raw_hdf.create_dataset(
                         'vis_transposed', chunks=True,
                         shape=nshape, dtype=vis.dtype,
-                        data=np.swapaxes(vis.value, 2, 0))
+                        data=np.swapaxes(vis[()], 2, 0))
         else:
             self.filename = filename
             self.is_temp_file = False
 
+        self.ctime_offset = ctime_offset
+
         with h5py.File(self.filename, 'r') as raw_hdf:
             self.metadata = dict(raw_hdf.attrs)
+            self.metadata['n_input'] = raw_hdf['index_map/input'].size
+            self.metadata['n_freq'] = raw_hdf['index_map/freq'].size
+            self.metadata['n_times'] = raw_hdf['index_map/time'].size
             self.baseline_list = list(combinations_with_replacement(
                 range(np.asscalar(self.metadata['n_input'])), 2))
             self.time_slice = slice(
-                0, np.asscalar(self.metadata['acq.frames_per_file']),
+                0, self.metadata['n_times'],
                 time_subsample)
             self.freq_slice = slice(
-                0, np.asscalar(self.metadata['n_freq']),
+                0, self.metadata['n_freq'],
                 freq_subsample)
             self.has_transposed = ('vis_transposed' in raw_hdf.keys())
 
@@ -92,7 +98,7 @@ class RawData(object):
         with h5py.File(self.filename, 'r') as raw_hdf:
             out = raw_hdf['index_map/time']['ctime'][
                 self.time_slice]
-        return out
+        return out + self.ctime_offset
 
     @property
     def times(self):
@@ -105,8 +111,9 @@ class RawData(object):
                 self.freq_slice]
         return out
 
-    def index(self, azimuth, altitude):
-        return index_file(self, altitude=altitude, azimuth=azimuth)
+    def index(self, azimuth, altitude, **kwargs):
+        return index_file(self, altitude=altitude, azimuth=azimuth, 
+                          **kwargs)
 
     def raw_query(self, query):
         """
@@ -123,7 +130,7 @@ class RawData(object):
             numpy array of requested dataset
         """
         with h5py.File(self.filename, 'r') as raw_hdf:
-            out = raw_hdf[query].value
+            out = raw_hdf[query][()]
         return out
 
     def baseline_from_prod(self, prod):
@@ -175,13 +182,13 @@ class RawData(object):
             if self.has_transposed:
                 index = (baseline, self.freq_slice, self.time_slice)
                 dset = 'vis_transposed'
-                real = raw_hdf[dset][index]['r'].T
-                imag = raw_hdf[dset][index]['i'].T
+                real = raw_hdf[dset][index].real.T
+                imag = raw_hdf[dset][index].imag.T
             else:
                 index = (self.time_slice, self.freq_slice, baseline)
                 dset = 'vis'
-                real = raw_hdf[dset][index]['r']
-                imag = raw_hdf[dset][index]['i']
+                real = raw_hdf[dset][index].real
+                imag = raw_hdf[dset][index].imag
 
         out = real + 1j * imag
         if which.lower() == 'complex':
@@ -222,13 +229,17 @@ class RawData(object):
         if axis is None:
             fig, axis = plt.subplots(1, 1)
 
+        # Goal ~ 8 ticks
+        interval = int(np.round((self.ctimes[-1] - self.ctimes[0])/60/40) * 5)
+        interval = np.max([interval, 5])
+
         if which.lower() == 'y':
             axis.yaxis_date()
             axis.set_ylabel('UTC')
             axis.yaxis.set_major_locator(
-                dates.MinuteLocator(byminute=[0, 30]))
+                dates.MinuteLocator(interval=interval))
             axis.yaxis.set_major_formatter(
-                dates.DateFormatter('%H:%M:%S'))
+                dates.DateFormatter('%H:%M'))
                     # Annotate with date of obs start
             axis.text(-0.015, 1.02, self.times[0].iso.split(' ')[0],
                       ha='right', va='bottom',
@@ -239,9 +250,9 @@ class RawData(object):
             axis.xaxis_date()
             axis.set_xlabel('UTC')
             axis.xaxis.set_major_locator(
-                dates.MinuteLocator(byminute=[0, 30]))
+                dates.MinuteLocator(interval=interval))
             axis.xaxis.set_major_formatter(
-                dates.DateFormatter('%H:%M:%S'))
+                dates.DateFormatter('%H:%M'))
             axis.text(-0.015, 1.02, self.times[0].iso.split(' ')[0],
                       ha='right', va='bottom',
                       transform=axis.transAxes)
@@ -307,6 +318,7 @@ class RawData(object):
         axis, _ = self.time_axis(which='y', axis=axis)
 
         axis.set_xlabel('Frequency [MHz]')
+        axis.set_xticks(np.linspace(400, 800, 5).astype(int))
         if baseline_title:
             axis.set_title('Baseline: ({:d}, {:d})'.format(
                 *self.baseline_list[baseline]))
@@ -342,3 +354,41 @@ class RawData(object):
             return filtered.real
         else:
             return filtered
+
+class RawDataSet(RawData):
+
+    @classmethod
+    def from_glob(cls, pattern, **kwargs):
+        list_of_files = sorted(glob.glob(pattern))
+        obj = cls([RawData(fname, **kwargs) for fname in list_of_files])
+        obj.filename_list = list_of_files
+        return obj
+
+    """ This is a quick hack"""
+    def __init__(self, list_of_rawdata):
+        self.raw_data_list = list_of_rawdata
+
+        self.metadata = self.raw_data_list[0].metadata
+        self.baseline_list = self.raw_data_list[0].baseline_list
+        self.time_slice = self.raw_data_list[0].time_slice
+        self.freq_slice = self.raw_data_list[0].freq_slice
+        self.has_transposed =  self.raw_data_list[0].has_transposed
+
+    def visibilities(self, baseline, which='complex'):
+        return np.concatenate(
+            [rd.visibilities(baseline, which=which) for rd in self.raw_data_list], axis=0)
+
+    @property
+    def ctimes(self):
+        return np.concatenate(
+            [rd.ctimes for rd in self.raw_data_list])
+
+    @property
+    def bands(self):
+        return self.raw_data_list[0].bands
+
+    def raw_query(self, query, data_index):
+        return self.raw_data_list[data_index].raw_query(query)
+
+    def baseline_from_prod(self, prod):
+        return self.raw_data_list[0].baseline_from_prod(prod)

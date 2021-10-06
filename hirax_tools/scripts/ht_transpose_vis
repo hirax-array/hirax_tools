@@ -8,14 +8,14 @@ def main(fnames):
     for fname in fnames:
         print(fname)
         data_file = h5py.File(fname, 'a')
-        vis = data_file['vis']
+        vis = data_file['vis'][()]
         nshape = (vis.shape[2], vis.shape[1], vis.shape[0])
         if 'vis_transposed' in data_file.keys():
             del data_file['vis_transposed']
         data_file.create_dataset(
             'vis_transposed', chunks=True,
             shape=nshape, dtype=vis.dtype,
-            data=np.swapaxes(vis.value, 2, 0))
+            data=np.swapaxes(vis, 2, 0))
         data_file.close()
 
 if __name__ == '__main__':

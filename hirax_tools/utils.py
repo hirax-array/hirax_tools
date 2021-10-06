@@ -18,6 +18,11 @@ HARTRAO_COORD = coords.EarthLocation.from_geodetic(
     height=1415.710*units.m,
     ellipsoid='WGS84')
 
+BLEIEN_COORD = coords.EarthLocation.from_geodetic(
+    lon=8.11*units.deg,
+    lat=47.34*units.deg,
+    height=469*units.m)
+
 def colorize(z, s=1.0, zmin=None, zmax=None, zero='black'):
     # Adapted from https://stackoverflow.com/questions/17044052/mathplotlib-imshow-complex-2d-array
     h = (np.angle(z) + np.pi)  / (2 * np.pi) + 0.5
